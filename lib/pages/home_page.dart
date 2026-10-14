@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:aurora/models/server.dart';
 import 'package:aurora/pages/server_edit_page.dart';
 import 'package:aurora/pages/settings_page.dart';
+import 'package:aurora/pages/sftp_page.dart';
 import 'package:aurora/pages/terminal_page.dart';
 import 'package:aurora/services/server_store.dart';
 
@@ -35,6 +36,14 @@ class _HomePageState extends State<HomePage> {
     await Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => TerminalPage(server: server),
+      ),
+    );
+  }
+
+  Future<void> _openSftp(Server server) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => SftpPage(server: server),
       ),
     );
   }
@@ -109,8 +118,7 @@ class _HomePageState extends State<HomePage> {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(Icons.dns_outlined,
-                      size: 72, color: scheme.outline),
+                  Icon(Icons.dns_outlined, size: 72, color: scheme.outline),
                   const SizedBox(height: 16),
                   Text(
                     '还没有服务器',
@@ -137,6 +145,7 @@ class _HomePageState extends State<HomePage> {
                 return _ServerTile(
                   server: s,
                   onTap: () => _openTerminal(s),
+                  onSftp: () => _openSftp(s),
                   onEdit: () => _editServer(s),
                   onDelete: () => _deleteServer(s),
                 );
@@ -150,12 +159,14 @@ class _ServerTile extends StatelessWidget {
   const _ServerTile({
     required this.server,
     required this.onTap,
+    required this.onSftp,
     required this.onEdit,
     required this.onDelete,
   });
 
   final Server server;
   final VoidCallback onTap;
+  final VoidCallback onSftp;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
 
@@ -172,7 +183,7 @@ class _ServerTile extends StatelessWidget {
         onTap: onTap,
         onLongPress: onEdit,
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
           child: Row(
             children: [
               Container(
@@ -184,7 +195,7 @@ class _ServerTile extends StatelessWidget {
                 ),
                 child: Icon(Icons.terminal, color: scheme.onPrimaryContainer),
               ),
-              const SizedBox(width: 14),
+              const SizedBox(width: 12),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -205,12 +216,20 @@ class _ServerTile extends StatelessWidget {
                   ],
                 ),
               ),
+              // SFTP 入口
+              IconButton(
+                tooltip: 'SFTP 文件',
+                icon: Icon(Icons.folder_outlined, color: scheme.primary),
+                onPressed: onSftp,
+              ),
               PopupMenuButton<String>(
                 onSelected: (v) {
+                  if (v == 'sftp') onSftp();
                   if (v == 'edit') onEdit();
                   if (v == 'delete') onDelete();
                 },
                 itemBuilder: (_) => const [
+                  PopupMenuItem(value: 'sftp', child: Text('SFTP 文件')),
                   PopupMenuItem(value: 'edit', child: Text('编辑')),
                   PopupMenuItem(value: 'delete', child: Text('删除')),
                 ],
