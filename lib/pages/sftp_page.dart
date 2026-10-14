@@ -1,9 +1,12 @@
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:dartssh2/dartssh2.dart';
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:aurora/models/server.dart';
+import 'package:aurora/pages/sftp_edit_page.dart';
 import 'package:aurora/services/sftp_session.dart';
 
 /// SFTP 文件列表页（交互参考 ServerBox 文件浏览器，精简实现）。
@@ -18,6 +21,7 @@ class SftpPage extends StatefulWidget {
 
 class _SftpPageState extends State<SftpPage> {
   late final SftpSession _session;
+  bool _uploading = false;
 
   @override
   void initState() {
@@ -53,7 +57,8 @@ class _SftpPageState extends State<SftpPage> {
       await _run(() => _session.cd(entry.filename));
       return;
     }
-    _showEntrySheet(entry);
+    // 点文件 → 编辑（同 ServerBox）
+    await _edit(entry);
   }
 
   Future<void> _run(Future<void> Function() action) async {
@@ -171,6 +176,66 @@ class _SftpPageState extends State<SftpPage> {
     }
   }
 
+  Future<void> _edit(SftpName entry) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => SftpEditPage(
+          session: _session,
+          fileName: entry.filename,
+        ),
+      ),
+    );
+    // 保存后刷新列表
+    if (mounted) await _run(_session.refresh);
+  }
+
+  /// 从系统选择文件上传到当前目录（参考 ServerBox 系统文件选择）。
+  Future<void> _upload() async {
+    if (_uploading) return;
+
+    final result = await FilePicker.platform.pickFiles(
+      allowMultiple: true,
+      withData: true,
+    );
+    if (result == null || result.files.isEmpty) return;
+
+    setState(() => _uploading = true);
+    var okCount = 0;
+    var failCount = 0;
+
+    try {
+      for (final f in result.files) {
+        final name = f.name;
+        if (name.isEmpty) continue;
+
+        Uint8List? bytes = f.bytes;
+        if (bytes == null && f.path != null) {
+          bytes = await File(f.path!).readAsBytes();
+        }
+        if (bytes == null) {
+          failCount++;
+          continue;
+        }
+
+        try {
+          await _session.writeFile(name, bytes);
+          okCount++;
+        } catch (_) {
+          failCount++;
+        }
+      }
+
+      if (!mounted) return;
+      final msg = failCount == 0
+          ? '已上传 $okCount 个文件'
+          : '成功 $okCount，失败 $failCount';
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg)));
+      await _session.refresh();
+    } finally {
+      if (mounted) setState(() => _uploading = false);
+    }
+  }
+
   void _showEntrySheet(SftpName entry) {
     final scheme = Theme.of(context).colorScheme;
     showModalBottomSheet(
@@ -191,7 +256,15 @@ class _SftpPageState extends State<SftpPage> {
               subtitle: Text(_entrySubtitle(entry)),
             ),
             const Divider(height: 1),
-            if (!entry.attr.isDirectory)
+            if (!entry.attr.isDirectory) ...[
+              ListTile(
+                leading: const Icon(Icons.edit_outlined),
+                title: const Text('编辑'),
+                onTap: () {
+                  Navigator.pop(ctx);
+                  _edit(entry);
+                },
+              ),
               ListTile(
                 leading: const Icon(Icons.download_outlined),
                 title: const Text('下载到本机'),
@@ -200,6 +273,7 @@ class _SftpPageState extends State<SftpPage> {
                   _download(entry);
                 },
               ),
+            ],
             ListTile(
               leading: const Icon(Icons.drive_file_rename_outline),
               title: const Text('重命名'),
@@ -258,7 +332,7 @@ class _SftpPageState extends State<SftpPage> {
     final scheme = Theme.of(context).colorScheme;
     final path = _session.currentPath;
     final entries = _session.entries.value;
-    final loading = _session.loading.value;
+    final loading = _session.loading.value || _uploading;
     final state = _session.state;
 
     return Scaffold(
@@ -292,6 +366,17 @@ class _SftpPageState extends State<SftpPage> {
             icon: const Icon(Icons.refresh),
             onPressed:
                 state == SftpState.ready ? () => _run(_session.refresh) : null,
+          ),
+          IconButton(
+            tooltip: '上传文件',
+            icon: _uploading
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.upload_file),
+            onPressed: state == SftpState.ready && !_uploading ? _upload : null,
           ),
           IconButton(
             tooltip: '新建文件夹',
@@ -356,8 +441,7 @@ class _SftpPageState extends State<SftpPage> {
                   ),
                 )
               : ListView.separated(
-                  itemCount: entries.length +
-                      (path != '/' ? 1 : 0),
+                  itemCount: entries.length + (path != '/' ? 1 : 0),
                   separatorBuilder: (_, __) => const Divider(height: 1),
                   itemBuilder: (context, index) {
                     if (path != '/' && index == 0) {
@@ -368,8 +452,7 @@ class _SftpPageState extends State<SftpPage> {
                         onTap: () => _run(() => _session.cd('..')),
                       );
                     }
-                    final entry =
-                        entries[path != '/' ? index - 1 : index];
+                    final entry = entries[path != '/' ? index - 1 : index];
                     if (entry.filename == '..') {
                       return const SizedBox.shrink();
                     }
