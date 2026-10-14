@@ -6,24 +6,31 @@ allprojects {
 }
 
 rootProject.buildDir = "../build"
+
 subprojects {
     project.buildDir = "${rootProject.buildDir}/${project.name}"
 }
-subprojects {
-    project.evaluationDependsOn(":app")
-}
 
-// Raise plugin modules (e.g. file_picker) to API 36 without afterEvaluate,
-// which conflicts with evaluationDependsOn(":app").
+// Do NOT use evaluationDependsOn(":app") here — it evaluates modules early
+// and breaks afterEvaluate hooks used to raise plugin compileSdk.
 subprojects { project ->
-    project.pluginManager.withPlugin("com.android.library") {
-        project.android {
-            compileSdk = 36
-        }
-    }
-    project.pluginManager.withPlugin("com.android.application") {
-        project.android {
-            compileSdk = 36
+    project.afterEvaluate {
+        if (project.hasProperty("android")) {
+            try {
+                project.android {
+                    if (it.hasProperty("compileSdk")) {
+                        compileSdk = 36
+                    }
+                    if (it.hasProperty("compileSdkVersion")) {
+                        compileSdkVersion 36
+                    }
+                    compileOptions {
+                        sourceCompatibility JavaVersion.VERSION_17
+                        targetCompatibility JavaVersion.VERSION_17
+                    }
+                }
+            } catch (Throwable ignored) {
+            }
         }
     }
 }
