@@ -11,8 +11,7 @@ subprojects {
     project.buildDir = "${rootProject.buildDir}/${project.name}"
 }
 
-// Do NOT use evaluationDependsOn(":app") here — it evaluates modules early
-// and breaks afterEvaluate hooks used to raise plugin compileSdk.
+// Align plugin modules with app: compileSdk 36 + JVM 17
 subprojects { project ->
     project.afterEvaluate {
         if (project.hasProperty("android")) {
@@ -30,6 +29,13 @@ subprojects { project ->
                     }
                 }
             } catch (Throwable ignored) {
+            }
+        }
+
+        // Kotlin tasks in plugins may still default to JVM 11
+        project.tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach {
+            kotlinOptions {
+                jvmTarget = JavaVersion.VERSION_17.toString()
             }
         }
     }
