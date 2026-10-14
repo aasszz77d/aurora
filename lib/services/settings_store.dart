@@ -1,5 +1,8 @@
+import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:aurora/models/virt_key_def.dart';
 
 enum AppThemeMode { system, light, dark }
 
@@ -11,10 +14,18 @@ class SettingsStore {
   static const _themeKey = 'theme_mode';
   static const _fontSizeKey = 'font_size';
   static const _virtKeysKey = 'virt_keys';
+  static const _virtKeyIdsKey = 'virt_key_ids';
+  static const _virtKeyRowsKey = 'virt_key_per_row';
 
   AppThemeMode themeMode = AppThemeMode.system;
   double fontSize = 14;
   bool showVirtKeys = true;
+
+  /// 当前启用的虚拟按键 id（有序）。
+  List<String> virtKeyIds = List.of(VirtKeyDef.defaultIds);
+
+  /// 每行最多几个键。
+  int virtKeysPerRow = 7;
 
   final List<void Function()> _listeners = [];
 
@@ -32,6 +43,11 @@ class SettingsStore {
         AppThemeMode.dark => ThemeMode.dark,
       };
 
+  List<VirtKeyDef> get enabledVirtKeys => [
+        for (final id in virtKeyIds)
+          if (VirtKeyDef.byId(id) case final k?) k,
+      ];
+
   Future<void> load() async {
     final prefs = await SharedPreferences.getInstance();
     final t = prefs.getString(_themeKey);
@@ -42,6 +58,19 @@ class SettingsStore {
     };
     fontSize = prefs.getDouble(_fontSizeKey) ?? 14;
     showVirtKeys = prefs.getBool(_virtKeysKey) ?? true;
+    virtKeysPerRow = (prefs.getInt(_virtKeyRowsKey) ?? 7).clamp(4, 10);
+
+    final raw = prefs.getString(_virtKeyIdsKey);
+    if (raw != null && raw.isNotEmpty) {
+      try {
+        final list = (jsonDecode(raw) as List).cast<String>();
+        if (list.isNotEmpty) {
+          virtKeyIds = list;
+        }
+      } catch (_) {
+        virtKeyIds = List.of(VirtKeyDef.defaultIds);
+      }
+    }
     _notify();
   }
 
@@ -72,4 +101,20 @@ class SettingsStore {
     await prefs.setBool(_virtKeysKey, value);
     _notify();
   }
+
+  Future<void> setVirtKeyIds(List<String> ids) async {
+    virtKeyIds = List.of(ids);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_virtKeyIdsKey, jsonEncode(virtKeyIds));
+    _notify();
+  }
+
+  Future<void> setVirtKeysPerRow(int n) async {
+    virtKeysPerRow = n.clamp(4, 10);
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt(_virtKeyRowsKey, virtKeysPerRow);
+    _notify();
+  }
+
+  Future<void> applyVirtKeyPreset(List<String> ids) => setVirtKeyIds(ids);
 }
