@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
+import 'package:aurora/models/virt_key_def.dart';
+import 'package:aurora/services/settings_store.dart';
 import 'package:xterm/xterm.dart';
 
-/// 底部虚拟按键条（参考 ServerBox 思路，精简实现）。
+/// 底部虚拟按键条：布局由 [SettingsStore] 驱动。
 class VirtKeysBar extends StatefulWidget {
   const VirtKeysBar({
     super.key,
@@ -17,45 +19,91 @@ class VirtKeysBar extends StatefulWidget {
 }
 
 class _VirtKeysBarState extends State<VirtKeysBar> {
+  final _settings = SettingsStore.instance;
   bool _ctrl = false;
   bool _alt = false;
 
-  void _tapChar(String ch) {
-    if (_ctrl) {
-      final code = ch.toUpperCase().codeUnitAt(0);
-      if (code >= 65 && code <= 90) {
-        widget.onInput(String.fromCharCode(code - 64));
-      } else {
-        widget.onInput(ch);
-      }
-      setState(() => _ctrl = false);
-    } else if (_alt) {
-      widget.onInput('\x1b$ch');
-      setState(() => _alt = false);
-    } else {
-      widget.onInput(ch);
-    }
+  @override
+  void initState() {
+    super.initState();
+    _settings.addListener(_onSettings);
   }
 
-  void _tapKey(TerminalKey key) {
-    widget.onKey(key);
+  @override
+  void dispose() {
+    _settings.removeListener(_onSettings);
+    super.dispose();
+  }
+
+  void _onSettings() {
+    if (mounted) setState(() {});
+  }
+
+  void _tapDef(VirtKeyDef def) {
+    switch (def.kind) {
+      case VirtKeyKind.modifier:
+        if (def.id == 'ctrl') {
+          setState(() => _ctrl = !_ctrl);
+        } else if (def.id == 'alt') {
+          setState(() => _alt = !_alt);
+        }
+        return;
+      case VirtKeyKind.terminalKey:
+        if (def.terminalKey != null) {
+          widget.onKey(def.terminalKey!);
+        }
+      case VirtKeyKind.char:
+        final ch = def.char ?? '';
+        if (_ctrl && ch.isNotEmpty) {
+          final code = ch.toUpperCase().codeUnitAt(0);
+          if (code >= 65 && code <= 90) {
+            widget.onInput(String.fromCharCode(code - 64));
+          } else {
+            widget.onInput(ch);
+          }
+        } else if (_alt && ch.isNotEmpty) {
+          widget.onInput('\x1b$ch');
+        } else {
+          widget.onInput(ch);
+        }
+      case VirtKeyKind.control:
+        if (def.controlCode != null) {
+          widget.onInput(String.fromCharCode(def.controlCode!));
+        }
+    }
     if (_ctrl) setState(() => _ctrl = false);
     if (_alt) setState(() => _alt = false);
+  }
+
+  bool _isActive(VirtKeyDef def) {
+    if (def.id == 'ctrl') return _ctrl;
+    if (def.id == 'alt') return _alt;
+    return false;
   }
 
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
     final bg = scheme.surfaceContainerHighest;
+    final keys = _settings.enabledVirtKeys;
+    final perRow = _settings.virtKeysPerRow;
 
-    Widget keyBtn({
-      required String label,
-      VoidCallback? onTap,
-      bool active = false,
-      double flex = 1,
-    }) {
+    if (keys.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    final rows = <List<VirtKeyDef>>[];
+    for (var i = 0; i < keys.length; i += perRow) {
+      rows.add(
+        keys.sublist(i, i + perRow > keys.length ? keys.length : i + perRow),
+      );
+    }
+
+    Widget keyBtn(VirtKeyDef def) {
+      final active = _isActive(def);
+      final isEnter = def.id == 'enter';
       return Expanded(
-        flex: (flex * 10).round(),
+        flex: isEnter ? 14 : 10,
         child: Padding(
           padding: const EdgeInsets.all(2),
           child: Material(
@@ -63,12 +111,12 @@ class _VirtKeysBarState extends State<VirtKeysBar> {
             borderRadius: BorderRadius.circular(6),
             child: InkWell(
               borderRadius: BorderRadius.circular(6),
-              onTap: onTap,
+              onTap: () => _tapDef(def),
               child: SizedBox(
                 height: 36,
                 child: Center(
                   child: Text(
-                    label,
+                    def.label,
                     style: TextStyle(
                       fontSize: 13,
                       fontWeight: FontWeight.w500,
@@ -93,63 +141,15 @@ class _VirtKeysBarState extends State<VirtKeysBar> {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
-              Row(
-                children: [
-                  keyBtn(
-                    label: 'Ctrl',
-                    active: _ctrl,
-                    onTap: () => setState(() => _ctrl = !_ctrl),
-                  ),
-                  keyBtn(
-                    label: 'Alt',
-                    active: _alt,
-                    onTap: () => setState(() => _alt = !_alt),
-                  ),
-                  keyBtn(label: 'Esc', onTap: () => _tapKey(TerminalKey.escape)),
-                  keyBtn(label: 'Tab', onTap: () => _tapKey(TerminalKey.tab)),
-                  keyBtn(label: '—', onTap: () => _tapChar('-')),
-                  keyBtn(label: '/', onTap: () => _tapChar('/')),
-                  keyBtn(label: '|', onTap: () => _tapChar('|')),
-                ],
-              ),
-              Row(
-                children: [
-                  keyBtn(label: '↑', onTap: () => _tapKey(TerminalKey.arrowUp)),
-                  keyBtn(label: '↓', onTap: () => _tapKey(TerminalKey.arrowDown)),
-                  keyBtn(label: '←', onTap: () => _tapKey(TerminalKey.arrowLeft)),
-                  keyBtn(label: '→', onTap: () => _tapKey(TerminalKey.arrowRight)),
-                  keyBtn(label: 'Home', onTap: () => _tapKey(TerminalKey.home)),
-                  keyBtn(label: 'End', onTap: () => _tapKey(TerminalKey.end)),
-                  keyBtn(label: '⌫', onTap: () => _tapKey(TerminalKey.backspace)),
-                ],
-              ),
-              Row(
-                children: [
-                  keyBtn(label: 'C-c', onTap: () {
-                    widget.onInput(String.fromCharCode(3));
-                  }),
-                  keyBtn(label: 'C-d', onTap: () {
-                    widget.onInput(String.fromCharCode(4));
-                  }),
-                  keyBtn(label: 'C-z', onTap: () {
-                    widget.onInput(String.fromCharCode(26));
-                  }),
-                  keyBtn(label: 'C-l', onTap: () {
-                    widget.onInput(String.fromCharCode(12));
-                  }),
-                  keyBtn(label: 'C-a', onTap: () {
-                    widget.onInput(String.fromCharCode(1));
-                  }),
-                  keyBtn(label: 'C-e', onTap: () {
-                    widget.onInput(String.fromCharCode(5));
-                  }),
-                  keyBtn(
-                    label: 'Enter',
-                    flex: 1.4,
-                    onTap: () => _tapKey(TerminalKey.enter),
-                  ),
-                ],
-              ),
+              for (final row in rows)
+                Row(
+                  children: [
+                    for (final k in row) keyBtn(k),
+                    // 不足一行时补空位，避免键被拉得过宽
+                    for (var i = row.length; i < perRow; i++)
+                      const Expanded(flex: 10, child: SizedBox()),
+                  ],
+                ),
             ],
           ),
         ),
