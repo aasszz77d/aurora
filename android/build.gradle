@@ -13,20 +13,17 @@ subprojects {
     project.evaluationDependsOn(":app")
 }
 
-// Force every Android library/app module (incl. plugins like file_picker)
-// to compile against API 36 — required by flutter_plugin_android_lifecycle.
-subprojects { sub ->
-    sub.afterEvaluate {
-        def androidExt = sub.extensions.findByName("android")
-        if (androidExt != null) {
-            try {
-                androidExt.compileSdk = 36
-            } catch (Throwable ignored) {
-                try {
-                    androidExt.compileSdkVersion = 36
-                } catch (Throwable ignored2) {
-                }
-            }
+// Raise plugin modules (e.g. file_picker) to API 36 without afterEvaluate,
+// which conflicts with evaluationDependsOn(":app").
+subprojects { project ->
+    project.pluginManager.withPlugin("com.android.library") {
+        project.android {
+            compileSdk = 36
+        }
+    }
+    project.pluginManager.withPlugin("com.android.application") {
+        project.android {
+            compileSdk = 36
         }
     }
 }
