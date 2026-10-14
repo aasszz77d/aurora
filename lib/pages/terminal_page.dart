@@ -1,0 +1,270 @@
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:aurora/models/server.dart';
+import 'package:aurora/services/settings_store.dart';
+import 'package:aurora/services/ssh_session.dart';
+import 'package:aurora/widgets/virt_keys.dart';
+import 'package:xterm/xterm.dart';
+
+/// 完整 SSH 终端页：连接、渲染、虚拟按键、重连。
+class TerminalPage extends StatefulWidget {
+  const TerminalPage({super.key, required this.server});
+
+  final Server server;
+
+  @override
+  State<TerminalPage> createState() => _TerminalPageState();
+}
+
+class _TerminalPageState extends State<TerminalPage> {
+  late final SshSession _session;
+  final _terminalKey = GlobalKey<TerminalViewState>();
+  final _focusNode = FocusNode();
+
+  final _settings = SettingsStore.instance;
+
+  @override
+  void initState() {
+    super.initState();
+    _session = SshSession(server: widget.server);
+    _session.stateNotifier.addListener(_onState);
+    _settings.addListener(_onSettings);
+    // 进入页面后自动连接
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _session.connect();
+      _focusNode.requestFocus();
+    });
+  }
+
+  @override
+  void dispose() {
+    _session.stateNotifier.removeListener(_onState);
+    _settings.removeListener(_onSettings);
+    _session.dispose();
+    _focusNode.dispose();
+    super.dispose();
+  }
+
+  void _onState() {
+    if (mounted) setState(() {});
+  }
+
+  void _onSettings() {
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _reconnect() async {
+    await _session.reconnect();
+    _focusNode.requestFocus();
+  }
+
+  Future<bool> _onWillPop() async {
+    if (_session.state == SshSessionState.connected) {
+      final ok = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          title: const Text('断开连接？'),
+          content: const Text('当前会话仍在连接中，确定退出吗？'),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: const Text('取消'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.pop(ctx, true),
+              child: const Text('断开并退出'),
+            ),
+          ],
+        ),
+      );
+      return ok ?? false;
+    }
+    return true;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final fontSize = _settings.fontSize;
+
+    final termTheme = isDark ? _darkTheme : _lightTheme;
+
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) async {
+        if (didPop) return;
+        if (await _onWillPop()) {
+          if (context.mounted) Navigator.of(context).pop();
+        }
+      },
+      child: Scaffold(
+        backgroundColor: termTheme.background,
+        appBar: AppBar(
+          title: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                widget.server.name,
+                style: const TextStyle(fontSize: 16),
+              ),
+              Text(
+                '${widget.server.username}@${widget.server.displayAddr}',
+                style: TextStyle(
+                  fontSize: 11,
+                  color: scheme.onSurfaceVariant,
+                  fontWeight: FontWeight.normal,
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            _StatusChip(state: _session.state),
+            IconButton(
+              tooltip: '重连',
+              icon: const Icon(Icons.refresh),
+              onPressed: _session.state == SshSessionState.connecting
+                  ? null
+                  : _reconnect,
+            ),
+            IconButton(
+              tooltip: '断开',
+              icon: const Icon(Icons.link_off),
+              onPressed: _session.state == SshSessionState.connected
+                  ? () async {
+                      await _session.close();
+                    }
+                  : null,
+            ),
+          ],
+        ),
+        body: Column(
+          children: [
+            if (_session.state == SshSessionState.connecting)
+              const LinearProgressIndicator(minHeight: 2),
+            if (_session.state == SshSessionState.failed)
+              MaterialBanner(
+                content: Text(
+                  _session.errorMessage ?? '连接失败',
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                leading: const Icon(Icons.error_outline),
+                actions: [
+                  TextButton(
+                    onPressed: _reconnect,
+                    child: const Text('重试'),
+                  ),
+                ],
+              ),
+            Expanded(
+              child: TerminalView(
+                _session.terminal,
+                controller: _session.controller,
+                focusNode: _focusNode,
+                autofocus: true,
+                textStyle: TerminalStyle(
+                  fontSize: fontSize,
+                  fontFamily: 'monospace',
+                ),
+                theme: termTheme,
+                padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                hardwareKeyboardOnly: false,
+              ),
+            ),
+            if (_settings.showVirtKeys)
+              VirtKeysBar(
+                onInput: (data) {
+                  _session.terminal.textInput(data);
+                  _focusNode.requestFocus();
+                },
+                onKey: (key) {
+                  _session.terminal.keyInput(key);
+                  _focusNode.requestFocus();
+                },
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _StatusChip extends StatelessWidget {
+  const _StatusChip({required this.state});
+  final SshSessionState state;
+
+  @override
+  Widget build(BuildContext context) {
+    final (label, color) = switch (state) {
+      SshSessionState.idle => ('空闲', Colors.grey),
+      SshSessionState.connecting => ('连接中', Colors.orange),
+      SshSessionState.connected => ('已连接', Colors.green),
+      SshSessionState.disconnected => ('已断开', Colors.grey),
+      SshSessionState.failed => ('失败', Colors.red),
+    };
+
+    return Padding(
+      padding: const EdgeInsets.only(right: 4),
+      child: Chip(
+        visualDensity: VisualDensity.compact,
+        label: Text(label, style: const TextStyle(fontSize: 11)),
+        avatar: CircleAvatar(backgroundColor: color, radius: 5),
+        padding: EdgeInsets.zero,
+        labelPadding: const EdgeInsets.only(right: 8),
+      ),
+    );
+  }
+}
+
+final _darkTheme = TerminalTheme(
+  cursor: const Color(0xFFAEAFAD),
+  selection: const Color(0x40FFFFFF),
+  foreground: const Color(0xFFCCCCCC),
+  background: const Color(0xFF1E1E1E),
+  black: const Color(0xFF000000),
+  red: const Color(0xFFCD3131),
+  green: const Color(0xFF0DBC79),
+  yellow: const Color(0xFFE5E510),
+  blue: const Color(0xFF2472C8),
+  magenta: const Color(0xFFBC3FBC),
+  cyan: const Color(0xFF11A8CD),
+  white: const Color(0xFFE5E5E5),
+  brightBlack: const Color(0xFF666666),
+  brightRed: const Color(0xFFF14C4C),
+  brightGreen: const Color(0xFF23D18B),
+  brightYellow: const Color(0xFFF5F543),
+  brightBlue: const Color(0xFF3B8EEA),
+  brightMagenta: const Color(0xFFD670D6),
+  brightCyan: const Color(0xFF29B8DB),
+  brightWhite: const Color(0xFFE5E5E5),
+  searchHitBackground: const Color(0xFFFFFF2B),
+  searchHitBackgroundCurrent: const Color(0xFF31FF26),
+  searchHitForeground: const Color(0xFF000000),
+);
+
+final _lightTheme = TerminalTheme(
+  cursor: const Color(0xFF000000),
+  selection: const Color(0x40000000),
+  foreground: const Color(0xFF333333),
+  background: const Color(0xFFFAFAFA),
+  black: const Color(0xFF000000),
+  red: const Color(0xFFCD3131),
+  green: const Color(0xFF00BC00),
+  yellow: const Color(0xFF949800),
+  blue: const Color(0xFF0451A5),
+  magenta: const Color(0xFFBC05BC),
+  cyan: const Color(0xFF0598BC),
+  white: const Color(0xFF555555),
+  brightBlack: const Color(0xFF666666),
+  brightRed: const Color(0xFFCD3131),
+  brightGreen: const Color(0xFF14CE14),
+  brightYellow: const Color(0xFFB5BA00),
+  brightBlue: const Color(0xFF0451A5),
+  brightMagenta: const Color(0xFFBC05BC),
+  brightCyan: const Color(0xFF0598BC),
+  brightWhite: const Color(0xFFA5A5A5),
+  searchHitBackground: const Color(0xFFFFFF2B),
+  searchHitBackgroundCurrent: const Color(0xFF31FF26),
+  searchHitForeground: const Color(0xFF000000),
+);
