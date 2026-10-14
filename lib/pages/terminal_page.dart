@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:aurora/models/server.dart';
+import 'package:aurora/pages/sftp_page.dart';
 import 'package:aurora/services/settings_store.dart';
 import 'package:aurora/services/ssh_session.dart';
 import 'package:aurora/widgets/virt_keys.dart';
@@ -29,7 +30,6 @@ class _TerminalPageState extends State<TerminalPage> {
     _session = SshSession(server: widget.server);
     _session.stateNotifier.addListener(_onState);
     _settings.addListener(_onSettings);
-    // 进入页面后自动连接
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _session.connect();
       _focusNode.requestFocus();
@@ -56,6 +56,14 @@ class _TerminalPageState extends State<TerminalPage> {
   Future<void> _reconnect() async {
     await _session.reconnect();
     _focusNode.requestFocus();
+  }
+
+  void _openSftp() {
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => SftpPage(server: widget.server),
+      ),
+    );
   }
 
   Future<bool> _onWillPop() async {
@@ -119,6 +127,12 @@ class _TerminalPageState extends State<TerminalPage> {
             ],
           ),
           actions: [
+            // SFTP 在连接状态左侧
+            IconButton(
+              tooltip: 'SFTP 文件',
+              icon: const Icon(Icons.folder_outlined),
+              onPressed: _openSftp,
+            ),
             _StatusChip(state: _session.state),
             IconButton(
               tooltip: '重连',
