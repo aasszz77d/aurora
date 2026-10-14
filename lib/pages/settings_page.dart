@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:aurora/pages/virt_keys_settings_page.dart';
 import 'package:aurora/services/settings_store.dart';
 
 class SettingsPage extends StatefulWidget {
@@ -66,6 +67,21 @@ class _SettingsPageState extends State<SettingsPage> {
             subtitle: const Text('底部 Ctrl / Esc / 方向键等'),
             value: _settings.showVirtKeys,
             onChanged: (v) => _settings.setShowVirtKeys(v),
+          ),
+          ListTile(
+            title: const Text('自定义虚拟按键'),
+            subtitle: Text(
+              '已选 ${_settings.virtKeyIds.length} 键 · 每行 ${_settings.virtKeysPerRow}',
+            ),
+            trailing: const Icon(Icons.chevron_right),
+            enabled: _settings.showVirtKeys,
+            onTap: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(
+                  builder: (_) => const VirtKeysSettingsPage(),
+                ),
+              );
+            },
           ),
           const Divider(),
           const _SectionHeader('关于'),
